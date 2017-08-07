@@ -23,7 +23,7 @@
 #include <asm/thread_info.h>
 #include <asm/pgtable.h>
 
-@@用于debug，暂不关注
+@@ 用于debug，暂不关注
 #if defined(CONFIG_DEBUG_LL) && !defined(CONFIG_DEBUG_SEMIHOSTING)
 #include CONFIG_DEBUG_LL_INCLUDE
 #endif
@@ -33,13 +33,15 @@
  * We place the page tables 16K below KERNEL_RAM_VADDR.  Therefore, we must
  * make sure that KERNEL_RAM_VADDR is correctly set.  Currently, we expect
  * the least significant 16 bits to be 0x8000, but we could probably
- * relax this restriction to KERNEL_RAM_VADDR >= PAGE_OFFSET + 0x4000
- *
+ * relax this restriction to KERNEL_RAM_VADDR >= PAGE_OFFSET + 0x4000.
+ */
+@@ PAGE_OFFSET = 0xC0000000， TEXT_OFFSET = 0x8000
 #define KERNEL_RAM_VADDR	(PAGE_OFFSET + TEXT_OFFSET)
 #if (KERNEL_RAM_VADDR & 0xffff) != 0x8000
 #error KERNEL_RAM_VADDR must start at 0xXXXX8000
 #endif
 
+@@ 这里不考虑LPAE模式，下面的也会略过......
 #ifdef CONFIG_ARM_LPAE
 	/* LPAE requires an additional page for the PGD */
 #define PG_DIR_SIZE	0x5000
@@ -49,12 +51,13 @@
 #define PMD_ORDER	2
 #endif
 
+	@@ swapper_pg_dir = 0xC0004000
 	.globl	swapper_pg_dir
 	.equ	swapper_pg_dir, KERNEL_RAM_VADDR - PG_DIR_SIZE
 
 	.macro	pgtbl, rd, phys
-	add	\rd, \phys, #TEXT_OFFSET
-	sub	\rd, \rd, #PG_DIR_SIZE
+	add	\rd, \phys, #TEXT_OFFSET	@@ rd = phys + 0x8000
+	sub	\rd, \rd, #PG_DIR_SIZE		@@ rd = rd - 0x4000
 	.endm
 
 /*
@@ -86,6 +89,22 @@ ENTRY(stext)
  THUMB(	.thumb			)	@ switch to Thumb now.
  THUMB(1:			)
 
+@@ __hyp_stub_install定义在arch/arm/kernel/hyp-stub.S文件中。
+@@@@ ENTRY(__hyp_stub_install)
+@@@@        store_primary_cpu_mode  r4, r5, r6
+@@@@ ENDPROC(__hyp_stub_install)
+@@@@
+@@@@        /*
+@@@@         * Save the primary CPU boot mode. Requires 3 scratch registers.
+@@@@         */
+@@@@        .macro  store_primary_cpu_mode  reg1, reg2, reg3
+@@@@        mrs     \reg1, cpsr				@ reg1 = cpsr
+@@@@        and     \reg1, \reg1, #MODE_MASK		@ reg1 = reg1 & 0x1f
+@@@@        adr     \reg2, .L__boot_cpu_mode_offset     @ 获取L__boot_cpu_mode_offset的地址，也就是“.long   __boot_cpu_mode - .”，
+@@@@                                                    @ 这个地址存放的是__boot_cpu_mode相对于该地址的offset，
+@@@@        ldr     \reg3, [\reg2]                      @ reg3 = [reg2]，也就是reg3保存offset
+@@@@        str     \reg1, [\reg2, \reg3]               @ [reg2 + reg3] = reg1，因此最终效果是__boot_cpu_mode保存的是cpu当前的mode
+@@@@        .endm
 #ifdef CONFIG_ARM_VIRT_EXT
 	bl	__hyp_stub_install
 #endif
