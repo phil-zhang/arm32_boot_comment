@@ -109,7 +109,31 @@ ENTRY(stext)
 	bl	__hyp_stub_install
 #endif
 	@ ensure svc mode and all interrupts masked
-	safe_svcmode_maskall r9
+@@@@ .macro safe_svcmode_maskall reg:req
+@@@@ #if __LINUX_ARM_ARCH__ >= 6 && !defined(CONFIG_CPU_V7M)
+@@@@        mrs     \reg , cpsr				@reg = cpsr
+@@@@        eor     \reg, \reg, #HYP_MODE
+@@@@        tst     \reg, #MODE_MASK
+@@@@        bic     \reg , \reg , #MODE_MASK
+@@@@        orr     \reg , \reg , #PSR_I_BIT | PSR_F_BIT | SVC_MODE
+@@@@ THUMB(  orr     \reg , \reg , #PSR_T_BIT        )
+@@@@        bne     1f					@@ 注意0x1f是system mode，这个mode一般是由异常mode设置MODE来进入的，如果在该模式时，一般表示异常模式已经进入，直接关闭异常模式
+@@@@        orr     \reg, \reg, #PSR_A_BIT
+@@@@        badr    lr, 2f
+@@@@        msr     spsr_cxsf, \reg @@ the operand to msr here is SPSR_<fields>, where <fields> "Is a sequence of one or more of" c, x, s, f, which represent bits 7:0, 15:8, 23:16 and 31:24 respectively.
+@@@@        __MSR_ELR_HYP(14)
+@@@@        __ERET
+@@@@ 1:      msr     cpsr_c, \reg
+@@@@ 2:
+@@@@ #else
+@@@@ /*
+@@@@  * workaround for possibly broken pre-v6 hardware
+@@@@  * (akita, Sharp Zaurus C-1000, PXA270-based)
+@@@@  */
+@@@@        setmode PSR_F_BIT | PSR_I_BIT | SVC_MODE, \reg
+@@@@ #endif
+@@@@ .endm
+	safe_svcmode_maskall r9			@@ disable FIQ & RIQ，and force into SVC mode
 
 	mrc	p15, 0, r9, c0, c0		@ get processor id
 	bl	__lookup_processor_type		@ r5=procinfo r9=cpuid
@@ -126,8 +150,8 @@ ENTRY(stext)
 #endif
 
 #ifndef CONFIG_XIP_KERNEL
-	adr	r3, 2f
-	ldmia	r3, {r4, r8}
+	adr	r3, 2f				@@ [r3] = 2f
+	ldmia	r3, {r4, r8}			@@ r4 = [r3], r8 = [r3 + 4]，因此r4存放的是编译时候符号2的虚拟地址，r8存放的就是PAGE_OFFSET的虚拟地址
 	sub	r4, r3, r4			@ (PHYS_OFFSET - PAGE_OFFSET)
 	add	r8, r8, r4			@ PHYS_OFFSET
 #else
@@ -138,9 +162,9 @@ ENTRY(stext)
 	 * r1 = machine no, r2 = atags or dtb,
 	 * r8 = phys_offset, r9 = cpuid, r10 = procinfo
 	 */
-	bl	__vet_atags
+	bl	__vet_atags			@@ 检查atags的有效性，对于device tree，直接检测初始的magic number是否匹配
 #ifdef CONFIG_SMP_ON_UP
-	bl	__fixup_smp
+	bl	__fixup_smp			@@ 
 #endif
 #ifdef CONFIG_ARM_PATCH_PHYS_VIRT
 	bl	__fixup_pv_table
@@ -182,7 +206,7 @@ ENTRY(stext)
 ENDPROC(stext)
 	.ltorg
 #ifndef CONFIG_XIP_KERNEL
-2:	.long	.
+2:	.long	.				@ .表示符号2的地址
 	.long	PAGE_OFFSET
 #endif
 
